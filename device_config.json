@@ -1,0 +1,53 @@
+{
+  "brain": {
+    "freeMemRatio": 0.01,
+    "powerStatus": null,
+    "dataPath": "/var/lib/lamassu-machine",
+    "powerStatus": null,
+    "batteryCapacityPath": null,
+    "tempSensorPath": "/sys/class/hwmon/hwmon1/device/temp2_input",
+    "scanLightOnInterval": null,
+    "scanLightOffInterval": 1000
+  },
+  "wifi": {
+    "wpa": {
+      "socket": "/var/run/wpa_supplicant"
+    },
+    "wpaConfigPath": "/etc/wpa_supplicant.conf"
+  },
+  "id003": {
+    "rs232": {
+      "device": ["/dev/ttyUSB0", "/dev/ttyS0"]
+    }
+  },
+  "billDispenser": {
+    "device": "/dev/ttyS1"
+  },
+  "scanner": {
+    "device": "/dev/video0",
+    "qr": {
+      "width": 640,
+      "height": 480,
+      "contrast": 30,
+      "lowExposure": 75,
+      "highExposure": null,
+      "exposureAdjustTime": 200
+    },
+    "photoId": {
+      "width": 1280,
+      "height": 960,
+      "contrast": 25,
+      "lowExposure": null,
+      "highExposure": null,
+      "exposureAdjustTime": 200
+    }
+  },
+  "updater": {
+    "caFile": "./certs/ca/my-root-ca.crt.pem",
+    "downloadDir": "/tmp/download",
+    "extractDir": "/tmp/extract",
+    "extractor": {
+      "lamassuPubKeyFile": "/var/lib/lamassu-machine/lamassu.pub.key"
+    }
+  }
+}

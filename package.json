@@ -1,0 +1,40 @@
+{
+  "name": "https-ssl-example",
+  "version": "1.0.1",
+  "description": "Zero-config HTTPS server example (complete with bogus TLS/SSL 2048-bit RSA PEM certs)",
+  "main": "showrequests.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node serve.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/valerybugakov/nodejs-ssl-example.git"
+  },
+  "keywords": [
+    "ssl",
+    "tls",
+    "https",
+    "rsa",
+    "pem",
+    "example",
+    "demo",
+    "test",
+    "openssl",
+    "crt",
+    "p12",
+    "csr",
+    "certificate",
+    "certs",
+    "cert",
+    "key",
+    "private",
+    "public"
+  ],
+  "author": "<skymk1@gmail.com>",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "lodash": "^4.3.0"
+  }
+}
