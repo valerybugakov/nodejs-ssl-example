@@ -18,7 +18,8 @@ var options = {
   secureProtocol: 'TLSv1_method',
   requestCert: true,
   ciphers: 'AES128-GCM-SHA256:RC4:HIGH:!MD5:!aNULL:!EDH',
-  honorCipherOrder: true
+  honorCipherOrder: true,
+  rejectUnauthorized: true,
 };
 
 process.on('SIGINT', function() { console.log('quitting'); process.exit(); });
