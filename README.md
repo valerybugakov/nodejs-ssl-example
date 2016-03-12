@@ -8,18 +8,31 @@ same **openssl** commands you'd use with any language.
 Usage
 ========
 
-Add updates.lamassu.is to hosts
+1. Server machine
+------------
+
+Generate CA, key and certificate. Load them to updater machine.
 
 ```
 git clone https://github.com/valerybugakov/nodejs-ssl-example.git
-
 npm install
 
-./bin/create-server-certs.sh
-./bin/create-root-ca.sh
-./bin/sign-csr.sh
+./gen.sh YOUR_CNAME_HERE
+scp -r certs root@YOUR_CNAME_HERE:/root/nodejs-ssl-example/certs
 
 node showrequests.js
+```
+
+2. Updater machine
+------------
+
+```
+git clone https://github.com/valerybugakov/nodejs-ssl-example.git
+npm install
+
 node updater.js
 ```
+
+Add CNAME to software_config.json `{ brain: updater: host: CNAME }`
+Add CNAME to hosts file if necessary.
 

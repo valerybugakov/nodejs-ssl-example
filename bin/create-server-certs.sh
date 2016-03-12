@@ -2,9 +2,11 @@
 set -u
 set -e
 
-FQDN='updates.lamassu.is'
+# If no CNAME passed default value will apply
+FQDN="${1:-updates.lamassu.is}"
+printf "Generating certificate from ${FQDN} \n\n"
 
-# make directories to work from
+# Make directories to work from
 mkdir -p certs/{server,client,ca,tmp}
 
 # Create Certificate for this domain,
