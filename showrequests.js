@@ -37,7 +37,7 @@ function handleDownload(req, res, clientCert) {
   console.log(304);
 }
 
-var s = https.createServer(options, function (req, res) {
+var server = https.createServer(options, function (req, res) {
   var timestamp = new Date().toISOString();
   var clientCert = req.connection.getPeerCertificate();
   var deviceId = req.headers['device-id'];
@@ -52,23 +52,60 @@ var s = https.createServer(options, function (req, res) {
   // if (subject) console.log(subject.O);
   // console.log('%s | %s | %s | %s | %s | %s', timestamp, remoteVersionString, deviceId, countryCode, country, ipAddress);
 
-  if (installedPackages) console.log(installedPackages);
-  if (req.url === '/') {
-    handleDownload(req, res, clientCert);
-  } else {
-    console.log('unknown path: %s', req.url);
-  }
+  // if (installedPackages) console.log(installedPackages);
+  // if (req.url === '/') {
+  //   handleDownload(req, res, clientCert);
+  // } else {
+  //   console.log('unknown path: %s', req.url);
+  // }
 })
 
-s.listen(8000, function() {
-  var port = s.address().port;
+server.listen(8000, function() {
+  var port = server.address().port;
   console.log('Listening on https://127.0.0.1:' + port);
 });
 
-s.on('request', function(req, res) {
-  console.log(req.headers)
+server.on('request', function(req, res) {
+  console.log(req.headers['device-id'])
+  var filename = path.join(__dirname, 'downloads', 'test.sh')
+  fs.readFile(filename, "binary", function(err, file) {
+    if(err) {
+      res.writeHead(500, {"Content-Type": "text/plain"});
+      res.write(err + "\n");
+      res.end();
+      return;
+    }
+
+    res.writeHead(200);
+    res.end(file, 'binary');
+  });
 })
 
-s.on('error', console.log);
-s.on('clientError', function(err) { console.log('client error: %s', err.message); });
-s.on('close', function() { console.log('close'); });
+server.on('error', console.log);
+server.on('clientError', function(err) { console.log('client error: %s', err.message); });
+server.on('close', function() { console.log('close'); });
+
+var WebSocketServer = require('ws').Server
+var wss = new WebSocketServer({ server: server });
+
+wss.on('connection', function connection(ws) {
+  console.log('WSS: client connected')
+
+  ws.on('message', function incoming(message) {
+    console.log('WSS: received: %s', message);
+  });
+
+  // ws.send('message from server');
+});
+
+// io = require('socket.io');
+// io = io.listen(s);
+//
+// io.sockets.on('connection', function(socket) {
+//   console.log('Client connected.');
+//
+//   // Disconnect listener
+//   socket.on('disconnect', function() {
+//     console.log('Client disconnected.');
+//   });
+// });

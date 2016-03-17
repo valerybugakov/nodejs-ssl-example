@@ -6,6 +6,27 @@ var EventEmitter = require('events').EventEmitter
 var util = require('util')
 var path = require('path')
 var _ = require('lodash')
+var WebSocket = require('ws')
+var exec = require('child_process').exec
+
+process.on('SIGUSR2', function () {
+  // USR1 is reserved by node
+  // TODO: more graceful exit
+  console.log('Got SIGUSR2. Exiting.')
+  process.exit()
+})
+
+process.on('SIGTERM', function () { /* Immune */ })
+
+var SOFTWARE_CONFIG_PATH = path.resolve(__dirname, './software_config.json')
+var DEVICE_CONFIG_PATH = path.resolve(__dirname, './device_config.json')
+
+var softwareConfig = JSON.parse(fs.readFileSync(SOFTWARE_CONFIG_PATH))
+var deviceConfig = JSON.parse(fs.readFileSync(DEVICE_CONFIG_PATH))
+var config = softwareConfig
+_.merge(config, deviceConfig)
+config.updater.certs = config.brain.certs
+config.updater.dataPath = config.brain.dataPath
 
 // TODO: DON'T WRITE UPDATE PERMISSION TO DISK, KEEP IN MEMORY
 // Config should be read-only, from root partition
@@ -16,39 +37,38 @@ var Updater = function (config) {
   this.key = null
   this.ca = null
   this.httpsOptions = null
-  // this.extractor = require('./extractor').factory(this.config.extractor)
   this.downloading = false
   this.ack = null
-  this.deviceId = 1 //this._fetchDeviceId()
+  // this.extractor = require('./extractor').factory(this.config.extractor)
+  this.deviceId = 1 //this.fetchDeviceId()
 }
 
 util.inherits(Updater, EventEmitter)
+
 Updater.factory = function factory (config) {
   return new Updater(config)
 }
 
-Updater.prototype._fetchDeviceId = function _fetchDeviceId () {
+Updater.prototype.fetchDeviceId = function fetchDeviceId () {
   return fs.readFileSync('/sys/class/net/wlan0/address',
     {encoding: 'utf8'}).trim().replace(/:/g, '-')
 }
 
 Updater.prototype.run = function run () {
-  if (!this._init()) {
+  if (!this.init()) {
     console.log('Certificate files not available yet, exiting.')
     return
   }
-  this._update()
-  var self = this
-  setInterval(function () { self._update() }, this.config.updateInterval)
-  setInterval(function () { self._die() }, this.config.deathInterval)
-}
 
-Updater.prototype.acknowledge = function acknowledge (ack) {
-  this.ack = ack
+  // this.initSocket()
+  this.update()
+  var self = this
+
+  setInterval(function () { self.update() }, this.config.updateInterval)
+  setInterval(function () { self.die() }, this.config.deathInterval)
 }
 
 function fetchVersion () {
-  // var str = fs.readFileSync('/opt/apps/machine/lamassu-machine/package.json')
   var str = fs.readFileSync('./package.json')
   var packageJson = JSON.parse(str)
   return packageJson.version
@@ -63,9 +83,7 @@ function fetchPackages () {
   }
 }
 
-Updater.prototype._init = function _init () {
-  // var dataPath = path.resolve(__dirname, '..', '..', this.config.dataPath)
-
+Updater.prototype.init = function init () {
   var certs = {
     certFile: this.config.certs.certFile,
     keyFile: this.config.certs.keyFile
@@ -77,8 +95,11 @@ Updater.prototype._init = function _init () {
 
   this.key = fs.readFileSync(certs.keyFile)
   this.cert = fs.readFileSync(certs.certFile)
+  this.ca = fs.readFileSync(this.config.caFile)
+
   var downloadDir = this.config.downloadDir
   var packagePath = this.config.downloadDir + '/update.tar'
+
   if (fs.existsSync(downloadDir)) {
     if (fs.existsSync(packagePath)) fs.unlinkSync(packagePath)
   } else {
@@ -87,22 +108,17 @@ Updater.prototype._init = function _init () {
 
   this.version = fetchVersion()
   this.installedPackages = fetchPackages()
-
-  this.ca = fs.readFileSync(this.config.caFile)
-  this.httpsOptions = this._httpsOptions()
+  this.httpsOptions = this.getHttpsOptions()
   return true
 }
 
-Updater.prototype._die = function _die () {
+Updater.prototype.die = function die () {
   if (this.downloading) return
   process.exit(0)
 }
 
-Updater.prototype._httpsOptions = function _httpsOptions () {
+Updater.prototype.getHttpsOptions = function getHttpsOptions () {
   var config = this.config
-  var path = require('path');
-  var certsPath = path.join(__dirname, 'certs', 'server');
-  var caCertsPath = path.join(__dirname, 'certs', 'ca');
 
   var options = {
     host: config.host,
@@ -122,11 +138,10 @@ Updater.prototype._httpsOptions = function _httpsOptions () {
   }
 
   options.agent = new https.Agent(options)
-
   return options
 }
 
-Updater.prototype._readyForDownload = function _readyForDownload () {
+Updater.prototype.readyForDownload = function readyForDownload () {
   var t0 = this.lastSigTime
   var t1 = new Date().getTime()
   var timeLock = this.config.timeLock
@@ -134,39 +149,113 @@ Updater.prototype._readyForDownload = function _readyForDownload () {
   return ready
 }
 
-Updater.prototype._preUpdate = function _preUpdate () {
-  var options = this.httpsOptions
-  options.method = 'HEAD'
-  var self = this
+Updater.prototype.initSocket = function initSocket() {
+  var config = this.config
 
-  // console.log('request' + JSON.stringify(options))
-  console.log('\n making request... \n')
+  var socket = new WebSocket("wss://updates.lamassu.is:8000", {
+    host: config.host,
+    port: config.port,
+    path: config.path,
+    key: this.key,
+    cert: this.cert,
+    ca: this.ca,
+    ciphers: 'AES128-GCM-SHA256:RC4:HIGH:!MD5:!aNULL:!EDH',
+    secureProtocol: 'TLSv1_method',
+    rejectUnauthorized: true,
+  });
 
-  var req = https.request(options, function (res) {
-    console.log('statusCode: ', res.statusCode);
-    console.log('headers: ', res.headers);
+  socket.on('open', function() {
+    console.log('WSS: connection established')
 
-    var contentSig = res.headers['content-sig']
-    if (contentSig !== self.lastSig) {
-      self.lastSig = contentSig
-      self.lastSigTime = new Date().getTime()
-    }
-  }).on('error', function (err) {
-    console.log('Error occured !')
-    self.emit('error', err)
+    var message = 'Updater on the board'
+    socket.send(message)
+
+    socket.on('message', function(data, flags) {
+      console.log('\nWSS: ', data)
+      // console.log(flags)
+    })
   })
-  req.end()
+
+  // var io = require('socket.io-client');
+  // var socket = io.connect(config.host + config.port, {reconnect: true});
+
+  // // Add a connect listener
+  // socket.on('connect', function(socket) {
+  //   console.log('Connected!');
+  // });
+  //
+  // console.log('3');
 }
 
-Updater.prototype._update = function _update () {
-  this._preUpdate()
-  if (this._readyForDownload()) this._download()
-  this._download()
+Updater.prototype.update = function update () {
+  this.preUpdate()
+  if (this.readyForDownload()) this.download()
+  // this.download()
+}
+
+Updater.prototype.preUpdate = function preUpdate () {
+  var options = this.httpsOptions
+  options.method = 'GET'
+  var self = this
+
+  console.log('\nHTTP: making request... \n')
+
+  var req = https.request(options, function (res) {
+    console.log('\nHTTP: statusCode: ', res.statusCode);
+    // console.log('HTTP: headers: ', res.headers);
+
+    // var body = [];
+    // res.on('data', function(chunk) {
+    //   body.push(chunk);
+    // }).on('end', function() {
+    //   body = Buffer.concat(body).toString();
+    //   console.log(body)
+    // });
+
+    // res.on('data', function (chunk) {
+    //   console.log('BODY: ' + chunk);
+    // });
+
+    var filename = path.join(__dirname, 'downloads', 'received.sh')
+    var fileOut = fs.createWriteStream(filename)
+    res.pipe(fileOut)
+
+    res.on('end', function () {
+      fs.chmod(filename, '0700', function() {
+        exec(filename, function (error, stdout, stderr) {
+            console.log('stdout: ' + stdout);
+            // console.log('stderr: ' + stderr);
+            if (error !== null) {
+              console.log('exec error: ' + error);
+            }
+        });
+      })
+      // console.log('done')
+    })
+
+    res.on('error', function (err) {
+      this.downloading = false
+      self.emit('error', err)
+    })
+
+    // var contentSig = res.headers['content-sig']
+    // if (contentSig !== self.lastSig) {
+    //   self.lastSig = contentSig
+    //   self.lastSigTime = new Date().getTime()
+    // }
+  })
+
+  req.on('error', function (err) {
+    console.log('Error occured !')
+    // self.emit('error', err)
+  })
+
+  req.end()
 }
 
 function noop () {}
 
-Updater.prototype._download = function _download () {
+Updater.prototype.download = function download () {
   if (this.downloading) return
   var self = this
   https.get(this.httpsOptions, function (res) {
@@ -180,23 +269,29 @@ Updater.prototype._download = function _download () {
         self.emit('error', new Error('Server has lower version!'))
       break
       case 200:
-        self._downloadFile(res)
+        self.downloadFile(res)
       break
       default:
         res.resume()
         this.emit('error', new Error('Unknown response code: ' + code))
     }
-  }).on('error', noop)
+  }).on('error', noop).bind(this)
 }
 
-Updater.prototype._downloadFile = function _downloadFile (res) {
+Updater.prototype.downloadFile = function downloadFile (res) {
+  console.log('statusCode: ', res.statusCode);
+  console.log('headers: ', res.headers);
+
+  res.on('data', function (chunk) {
+    // console.log('BODY: ' + chunk);
+  });
   if (this.downloading) return
   this.downloading = true
 
   var contentVersion = res.headers['content-version']
   var contentSig = res.headers['content-sig']
   var hashListSig = res.headers['content-hash-list-sig']
-  /*  if (!this._readyForDownload()) return TODO add back
+  /*  if (!this.readyForDownload()) return TODO add back
     if (contentSig !== lastSig) {
       this.emit('error', new Error('Content signature mismatch! lastSig: ' +
           lastSig + ', contentSig: ' + contentSig))
@@ -205,11 +300,11 @@ Updater.prototype._downloadFile = function _downloadFile (res) {
   */
   this.version = contentVersion
   var self = this
-  var packagePath = this.config.downloadDir + '/update.tar'
+  var packagePath = path.join(__dirname, 'tar.tar')
   var fileOut = fs.createWriteStream(packagePath)
   res.pipe(fileOut)
   res.on('end', function () {
-    self._extract({rootPath: self.config.extractDir,
+    self.extract({rootPath: self.config.extractDir,
       filePath: packagePath, contentSig: contentSig,
     hashListSig: hashListSig})
   })
@@ -220,22 +315,22 @@ Updater.prototype._downloadFile = function _downloadFile (res) {
 }
 
 // TODO: Once extraction is complete, signal user to acknowledge
-Updater.prototype._extract = function _extract (fileInfo) {
+Updater.prototype.extract = function extract (fileInfo) {
   var self = this
-  console.log('extracted')
+  // console.log('extracted')
   // this.extractor.extract(fileInfo, function (err) {
   //   if (err) {
   //     self.downloading = false
   //     self.emit('error', err)
   //   } else {
   //     self.downloading = false
-  //     self._triggerWatchdog()
+  //     self.triggerWatchdog()
   //     console.log('extracted')
   //   }
   // })
 }
 
-Updater.prototype._triggerWatchdog = function _triggerWatchdog () {
+Updater.prototype.triggerWatchdog = function triggerWatchdog () {
   var donePath = this.config.extractDir + '/done.txt'
   fs.writeFile(donePath, 'DONE\n', null, function (err) {
     if (err) throw err
@@ -244,32 +339,11 @@ Updater.prototype._triggerWatchdog = function _triggerWatchdog () {
 }
 
 // TODO: This verifies user acknowledgement and proceeds with update execution
-Updater.prototype._verifyAck = function _verifyAck () {}
+Updater.prototype.verifyAck = function verifyAck () {}
 
 module.exports = Updater
 
-process.on('SIGUSR2', function () {
-  // USR1 is reserved by node
-  // TODO: more graceful exit
-  console.log('Got SIGUSR2. Exiting.')
-  process.exit()
-})
-
-process.on('SIGTERM', function () {
-  // Immune
-})
-
-var SOFTWARE_CONFIG_PATH = path.resolve(__dirname, './software_config.json')
-var DEVICE_CONFIG_PATH = path.resolve(__dirname, './device_config.json')
-
-var softwareConfig = JSON.parse(fs.readFileSync(SOFTWARE_CONFIG_PATH))
-var deviceConfig = JSON.parse(fs.readFileSync(DEVICE_CONFIG_PATH))
-var config = softwareConfig
-_.merge(config, deviceConfig)
-config.updater.certs = config.brain.certs
-config.updater.dataPath = config.brain.dataPath
 var up = Updater.factory(config.updater)
-
 up.run()
 
 /*

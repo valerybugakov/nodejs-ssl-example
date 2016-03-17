@@ -42,7 +42,7 @@
   "updater": {
     "port": 8000,
     "host": "updates.lamassu.is",
-    "updateInterval": 30000,
+    "updateInterval": 5000,
     "deathInterval": 600000,
     "extractor": {
       "sigAlg": "RSA-SHA256",
